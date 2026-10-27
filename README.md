@@ -27,7 +27,84 @@ pip install -e .
 
 ## Usage
 
+### Standalone pretrained inference check
+
+Run one CFM + MPPI planning call without ROS, Arena, plotting, or training:
+
+```bash
+cd /home/azaro/cfm_mppi
+conda activate cfm_mppi
+python -m cfm_mppi.evaluation.smoke_inference --device cpu
+```
+
+This loads the pretrained checkpoint and UCY scenario 110, uses 20 candidates
+and an 80-step horizon, and validates the returned control sequences. It prints
+the first unicycle control `[v, omega]` and inference time. To use the evaluator's
+200-candidate setting and save the result:
+
+```bash
+python -m cfm_mppi.evaluation.smoke_inference --device cpu --samples 200 \
+  --output /tmp/cfm_mppi_reference_inference.json
+```
+
+Use `--device cuda` with a working CUDA environment, or `--device auto` to select
+the available device. Model and dataset paths are resolved from the module's
+location. The command does not publish robot commands.
+
+Check consecutive planning calls and reset reproducibility:
+
+```bash
+python -m cfm_mppi.evaluation.smoke_inference --device cpu --steps 12 \
+  --check-reset --output /tmp/cfm_mppi_repeated_inference.json
+```
+
+Repeat with no obstacle tracks:
+
+```bash
+python -m cfm_mppi.evaluation.smoke_inference --device cpu --steps 12 \
+  --empty-scene --check-reset --output /tmp/cfm_mppi_empty_inference.json
+```
+
+These checks use the reference evaluator's finite, shrinking planning horizon
+and a numerical unicycle rollout. They validate finite, bounded controls on every
+call. The reset check recreates the MPPI solver, all four history buffers, noise,
+and numerical state; with the same seed and observations, full control sequences
+must match the initial episode. The pretrained model stays loaded. `--steps`
+accepts 1 through 80; this is not yet an indefinitely running controller.
+
+Both 12-call CPU checks passed with 20 candidates, including history-buffer
+rollover at 10 entries and matching reset replays (48 planning calls total).
+Warm calls were approximately 0.46–0.53 seconds on this machine. This validates
+offline inference behavior, not 10 Hz operation or Arena navigation. An Arena
+bridge still needs observation/frame conversion, stale-result handling, and a
+deliberate policy for maintaining or restarting the planning horizon.
+
+### Arena worker
+
+The separate ROS integration uses `cfm_mppi.evaluation.arena_worker`: a persistent
+pretrained process with newline-delimited JSON requests and responses on
+stdin/stdout. It is started by Arena's `cfm_mppi_bridge.py`. It uses a fresh
+80-step plan per request, accepts map-frame robot `[x,y,yaw]` and goal `[x,y]`,
+and currently assumes an empty scene. Arena owns timing, reset-generation checks,
+command bounds, and MBF routing. See
+`/home/azaro/arena_ws/src/arena/arena-rosnav/arena_bringup/CFM_MPPI_BRIDGE.md`
+for the tested launch and enable commands.
+
+For Arena's separate `cfm_mppi_continuous` option, a worker request with
+`"sequence": true` returns 80 controls, 81 predicted unicycle poses, and dt=0.1.
+This mode applies [0, 0.1] m/s and [-0.3, 0.3] rad/s bounds inside MPPI, allowing
+the ROS side to align delayed plans with measured motion. The original
+single-action mode remains available. See Arena's `CFM_CONTINUOUS.md` for the
+empty-scene goal-approach results and commands.
+
+The obstacle-aware Arena option additionally sends `"obstacles"` as map-frame
+`[x,y,vx,vy]` tracks and `"collision_radius"`. Omitted tracks retain the empty
+baseline. `"reverse": true` permits sequence-mode speed down to -0.1 m/s;
+sequence mode remains forward-only by default. See Arena's `CFM_OBSTACLES.md`
+for the adapters, scenarios, and current validation status.
+
 ### Training
+
 To train the CFM (Conditional Flow Matching) model, run:
 
 ```bash

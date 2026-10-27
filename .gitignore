@@ -51,4 +51,4 @@ MANIFEST
 
 *logs/
 *.out
-*.err
+*.errMiniconda3-latest-Linux-x86_64.sh
